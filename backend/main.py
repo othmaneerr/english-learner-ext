@@ -4,8 +4,10 @@
     cd backend
     python -m venv .venv && source .venv/bin/activate   # على ويندوز: .venv\\Scripts\\activate
     pip install -r requirements.txt
-    cp .env.example .env     # ثم ضع مفتاح ANTHROPIC_API_KEY
+    cp .env.example .env     # ثم ضع المفتاح (GEMINI_API_KEY أو ANTHROPIC_API_KEY)
     uvicorn main:app --reload --port 8000
+
+المزوّد يُختار من .env عبر AI_PROVIDER = gemini (الافتراضي، له طبقة مجانية) أو claude.
 """
 
 import json
@@ -13,7 +15,7 @@ import os
 import re
 from typing import Literal
 
-from anthropic import AsyncAnthropic
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +23,10 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().lower()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+MODEL = GEMINI_MODEL if PROVIDER == "gemini" else CLAUDE_MODEL
 Level = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
 
 app = FastAPI(title="AI English Learner API", version="0.3.0")
@@ -34,16 +39,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_client: AsyncAnthropic | None = None
+_claude_client = None
 
 
-def client() -> AsyncAnthropic:
-    global _client
-    if _client is None:
+async def call_claude(system: str, user: str) -> str:
+    global _claude_client
+    if _claude_client is None:
         if not os.getenv("ANTHROPIC_API_KEY"):
             raise HTTPException(500, "ANTHROPIC_API_KEY غير موجود في ملف .env")
-        _client = AsyncAnthropic()
-    return _client
+        from anthropic import AsyncAnthropic  # مستورد هنا حتى لا يلزم إلا لمن يستعمل Claude
+
+        _claude_client = AsyncAnthropic()
+    resp = await _claude_client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=900,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+
+
+async def call_gemini(system: str, user: str) -> str:
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise HTTPException(500, "GEMINI_API_KEY غير موجود في ملف .env")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    body = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 1200},
+    }
+    async with httpx.AsyncClient(timeout=40) as http:
+        r = await http.post(url, headers={"x-goog-api-key": key}, json=body)
+
+    if r.status_code == 429:
+        raise HTTPException(429, "تجاوزت الحد المجاني للطلبات. انتظر قليلاً ثم حاول مرة أخرى.")
+    if r.status_code in (400, 401, 403):
+        raise HTTPException(502, "رفض Gemini الطلب: تحقق من GEMINI_API_KEY في ملف .env.")
+    if r.status_code == 404:
+        raise HTTPException(502, f"النموذج «{GEMINI_MODEL}» غير موجود. غيّر GEMINI_MODEL في ملف .env.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"خطأ من Gemini ({r.status_code}).")
+
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, ValueError):
+        raise HTTPException(502, "لم يرجع Gemini ردّاً (ربما حُجب المحتوى). جرّب نصاً آخر.")
+    return "".join(p.get("text", "") for p in parts)
+
+
+async def generate(system: str, user: str) -> str:
+    if PROVIDER == "gemini":
+        return await call_gemini(system, user)
+    if PROVIDER == "claude":
+        return await call_claude(system, user)
+    raise HTTPException(500, "AI_PROVIDER يجب أن يكون gemini أو claude")
 
 
 class ExplainRequest(BaseModel):
@@ -113,7 +163,7 @@ def extract_json(raw: str) -> dict:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": MODEL}
+    return {"status": "ok", "provider": PROVIDER, "model": MODEL}
 
 
 @app.post("/explain", response_model=ExplainResponse)
@@ -124,18 +174,12 @@ async def explain(req: ExplainRequest):
         f"Surrounding context: {req.context or '(none)'}"
     )
     try:
-        resp = await client().messages.create(
-            model=MODEL,
-            max_tokens=900,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
-        )
+        raw = await generate(SYSTEM_PROMPT, user_msg)
     except HTTPException:
         raise
-    except Exception as e:  # أخطاء الشبكة/المفتاح/الحد
+    except Exception as e:  # أخطاء الشبكة/المهلة
         raise HTTPException(502, f"فشل الاتصال بخدمة الذكاء الاصطناعي: {type(e).__name__}")
 
-    raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     try:
         return ExplainResponse(**extract_json(raw))
     except Exception:
