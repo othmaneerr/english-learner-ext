@@ -188,6 +188,62 @@ async def list_models():
     return {"current": GEMINI_MODEL, "available": names}
 
 
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+
+
+class ImageRequest(BaseModel):
+    prompt: str = Field(min_length=3, max_length=400, description="وصف المشهد (visual_hint)")
+
+
+class ImageResponse(BaseModel):
+    mime: str
+    data: str  # base64
+
+
+@app.post("/image", response_model=ImageResponse)
+async def image(req: ImageRequest):
+    """يولّد صورة بسيطة توضّح المعنى (المرحلة 4). تعمل مع Gemini فقط."""
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise HTTPException(500, "GEMINI_API_KEY غير موجود في ملف .env")
+    prompt = (
+        "A simple, clear, friendly illustration for an English learner. "
+        "No text, letters or words anywhere in the picture. Scene: " + req.prompt
+    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"responseModalities": ["IMAGE"]},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as http:
+            r = await http.post(url, headers={"x-goog-api-key": key}, json=body)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"فشل الاتصال بخدمة الصور: {type(e).__name__}")
+
+    if r.status_code == 429:
+        raise HTTPException(429, "تجاوزت الحد المجاني لتوليد الصور. حاول لاحقاً.")
+    if r.status_code == 404:
+        raise HTTPException(502, f"نموذج الصور «{GEMINI_IMAGE_MODEL}» غير متاح. غيّر GEMINI_IMAGE_MODEL في .env.")
+    if r.status_code != 200:
+        # رسالة Google الأصلية تساعد في التشخيص (لا تحتوي المفتاح)
+        try:
+            detail = r.json().get("error", {}).get("message", "")
+        except ValueError:
+            detail = ""
+        raise HTTPException(502, f"خطأ من خدمة الصور ({r.status_code}). {detail[:200]}")
+
+    try:
+        parts = r.json()["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, ValueError):
+        raise HTTPException(502, "لم تُرجع الخدمة صورة (ربما حُجب الوصف). جرّب نصاً آخر.")
+    for p in parts:
+        inline = p.get("inlineData") or p.get("inline_data")
+        if inline and inline.get("data"):
+            return ImageResponse(mime=inline.get("mimeType") or inline.get("mime_type") or "image/png", data=inline["data"])
+    raise HTTPException(502, "لم تُرجع الخدمة صورة. جرّب مرة أخرى.")
+
+
 @app.post("/explain", response_model=ExplainResponse)
 async def explain(req: ExplainRequest):
     user_msg = (

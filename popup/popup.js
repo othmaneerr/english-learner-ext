@@ -20,7 +20,12 @@ const els = {
   idiomBox: $("idiom-box"),
   idiomNote: $("idiom-note"),
   examples: $("examples"),
+  imageBtn: $("image-btn"),
+  imageStatus: $("image-status"),
+  image: $("image"),
 };
+
+let visualHint = "";
 
 const HINTS = {
   none: "لم تحدّد أي نص بعد. حدّد كلمة أو جملة إنجليزية في الصفحة، ثم افتح الإضافة أو اضغط «تحديث التحديد».",
@@ -138,7 +143,50 @@ function renderResult(data) {
       return li;
     })
   );
+  visualHint = data.visual_hint || data.meaning || "";
+  els.image.hidden = true;
+  els.image.removeAttribute("src");
+  els.imageStatus.textContent = "";
+  els.imageStatus.classList.remove("error");
+  els.imageBtn.disabled = !visualHint;
   els.result.hidden = false;
+}
+
+async function showImage() {
+  if (!visualHint) return;
+  els.imageBtn.disabled = true;
+  els.image.hidden = true;
+  els.imageStatus.classList.remove("error");
+  els.imageStatus.textContent = "جارٍ توليد الصورة… قد تأخذ بضع ثوانٍ.";
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 70000);
+  try {
+    const res = await fetch(`${API_URL}/image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: visualHint }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).detail || ""; } catch (_) {}
+      throw new Error(detail || `خطأ من الخادم (${res.status})`);
+    }
+    const { mime, data } = await res.json();
+    els.image.src = `data:${mime};base64,${data}`;
+    els.image.alt = visualHint;
+    els.image.hidden = false;
+    els.imageStatus.textContent = "";
+  } catch (e) {
+    els.imageStatus.classList.add("error");
+    if (e.name === "AbortError") els.imageStatus.textContent = "انتهت المهلة. حاول مرة أخرى.";
+    else if (e instanceof TypeError) els.imageStatus.textContent = "تعذّر الاتصال بالخادم.";
+    else els.imageStatus.textContent = e.message;
+  } finally {
+    clearTimeout(timer);
+    els.imageBtn.disabled = !visualHint;
+  }
 }
 
 // ---------- الشرح ----------
@@ -200,6 +248,7 @@ els.level.addEventListener("change", () => {
   chrome.storage.local.set({ level: els.level.value });
 });
 els.explain.addEventListener("click", explain);
+els.imageBtn.addEventListener("click", showImage);
 els.refresh.addEventListener("click", update);
 
 (async () => {

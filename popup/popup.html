@@ -10,7 +10,7 @@
   <main class="card">
     <header>
       <h1>AI English Learner</h1>
-      <span class="badge">v0.3</span>
+      <span class="badge">v0.4</span>
     </header>
 
     <section id="selection-box" class="selection empty" aria-live="polite">
@@ -50,6 +50,11 @@
       </div>
       <p class="label">Examples</p>
       <ul id="examples" class="examples"></ul>
+      <div class="visual" dir="rtl">
+        <button id="image-btn" type="button" class="secondary">أظهر صورة توضيحية</button>
+        <p id="image-status" class="status"></p>
+        <img id="image" class="scene" alt="" hidden />
+      </div>
     </section>
   </main>
   <script src="popup.js"></script>
