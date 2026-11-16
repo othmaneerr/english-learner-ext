@@ -166,6 +166,28 @@ async def health():
     return {"status": "ok", "provider": PROVIDER, "model": MODEL}
 
 
+@app.get("/models")
+async def list_models():
+    """يعرض نماذج Gemini المتاحة لمفتاحك (لاختيار GEMINI_MODEL). لا يُظهر المفتاح."""
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise HTTPException(500, "GEMINI_API_KEY غير موجود في ملف .env")
+    async with httpx.AsyncClient(timeout=20) as http:
+        r = await http.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            headers={"x-goog-api-key": key},
+            params={"pageSize": 200},
+        )
+    if r.status_code != 200:
+        raise HTTPException(502, f"تعذّر جلب النماذج ({r.status_code}). تحقق من المفتاح.")
+    names = [
+        m["name"].removeprefix("models/")
+        for m in r.json().get("models", [])
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+    ]
+    return {"current": GEMINI_MODEL, "available": names}
+
+
 @app.post("/explain", response_model=ExplainResponse)
 async def explain(req: ExplainRequest):
     user_msg = (
