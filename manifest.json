@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "AI English Learner",
+  "version": "0.3.0",
+  "description": "حدّد أي كلمة أو جملة إنجليزية في الصفحة وتعلّمها بالذكاء الاصطناعي.",
+  "action": {
+    "default_title": "AI English Learner",
+    "default_popup": "popup/popup.html"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://localhost:8000/*", "http://127.0.0.1:8000/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

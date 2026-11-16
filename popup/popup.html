@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI English Learner</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="card">
+    <header>
+      <h1>AI English Learner</h1>
+      <span class="badge">v0.3</span>
+    </header>
+
+    <section id="selection-box" class="selection empty" aria-live="polite">
+      <p class="label">النص المحدد</p>
+      <p id="selected-text" class="text" dir="auto"></p>
+      <p id="meta" class="meta"></p>
+    </section>
+
+    <p id="hint" class="hint"></p>
+
+    <div class="row">
+      <label for="level">مستواك</label>
+      <select id="level">
+        <option value="A1">A1 — مبتدئ</option>
+        <option value="A2">A2 — أساسي</option>
+        <option value="B1" selected>B1 — متوسط</option>
+        <option value="B2">B2 — فوق المتوسط</option>
+        <option value="C1">C1 — متقدم</option>
+        <option value="C2">C2 — إتقان</option>
+      </select>
+    </div>
+
+    <div class="row buttons">
+      <button id="explain" type="button" disabled>اشرح</button>
+      <button id="refresh" type="button" class="secondary">تحديث التحديد</button>
+    </div>
+
+    <p id="status" class="status" aria-live="polite"></p>
+
+    <section id="result" class="result" hidden dir="ltr">
+      <span id="kind" class="badge"></span>
+      <p id="meaning" class="meaning"></p>
+      <p id="explanation" class="explanation"></p>
+      <div id="idiom-box" class="idiom" hidden>
+        <p class="label">Idiom note</p>
+        <p id="idiom-note"></p>
+      </div>
+      <p class="label">Examples</p>
+      <ul id="examples" class="examples"></ul>
+    </section>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
